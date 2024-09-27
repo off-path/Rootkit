@@ -11,6 +11,8 @@ MODULE_AUTHOR("victor, marouane, mina, axel");
 MODULE_DESCRIPTION("Hide LKM");
 MODULE_VERSION("0.01");
 
+void showme(void);
+void hideme(void);
 
 // list_head -> double liste chainé utilisé par le kernel
 // ca prends un .prev et .next mais on peut utiliser list_del() et list_add() pour ajouter/enlever des items de la struct list_head

