@@ -1,7 +1,12 @@
-obj-m += rootkit.o
+obj-m := rootkit.o
+KDIR := /home/offpath/Documents/ec2600/sem3/kernel/linux-6.10.11
+ARCH := x86_64
+
+#sur arch, on mets la variable CROSS_COMPILE en commentaire, les autres ca devrait etre good :)
+CROSS_COMPILE := x86_64-linux-gnu-
 
 all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+    $(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KDIR) M=$(PWD) modules
 
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+    $(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KDIR) M=$(PWD) cliean
