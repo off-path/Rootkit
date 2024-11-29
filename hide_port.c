@@ -14,7 +14,7 @@
 // licence du module (GPL = General Public License) en gros opensource
 // le LKM sera marqué comme propriétaire si on ne mets pas ca et si le noyau impose des restrictions sur les modules propriétaires, ca peut poser des problemes
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("victor, marouane, mina, axel");
+MODULE_AUTHOR("victor");
 // pour avoir la description quand on fait modinfo 
 MODULE_DESCRIPTION("Hide LKM");
 MODULE_VERSION("0.01");
