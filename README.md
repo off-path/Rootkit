@@ -63,7 +63,7 @@ Detailed information about the features can be found in the `features` folder of
 ### Cleaning Up
 
 To clean up build artifacts:
-    ```bash
+    ```
     make clean
     ```
 
