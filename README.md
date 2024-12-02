@@ -37,6 +37,9 @@ Detailed information about the features can be found in the `features` folder of
 ### 3. Module Protection
 - Protects the module from being unloaded while it is active, ensuring uninterrupted functionality.
 
+### 4. Module Persistence
+- Ensures the module remains persistent across reboots, maintaining continuous functionality without manual intervention.
+
 ---
 
 ## Compilation and Usage
