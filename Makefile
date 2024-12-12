@@ -1,5 +1,5 @@
-obj-m := rootkit.o
-KDIR := /home/offpath/Documents/ec2600/sem3/kernel/linux-6.10.11
+obj-m := hide_port.o
+KDIR := /home/marouane/Documents/linux-6.10.11
 ARCH := x86_64
 
 #CROSS_COMPILE := x86_64-linux-gnu-
@@ -9,3 +9,4 @@ all:
 
 clean:
 	$(MAKE) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) -C $(KDIR) M=$(PWD) clean
+
