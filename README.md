@@ -70,6 +70,13 @@ To clean up build artifacts:
     make clean
     ```
 
+### Users
+
+User:   Password:
+-> root -> password
+-> feur -> apagnan
+
+
 ### Authors
 
     - Victor
