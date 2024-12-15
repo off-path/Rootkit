@@ -69,6 +69,10 @@ To clean up build artifacts:
     ```
     make clean
     ```
+### User
+Users: Password:
+->root -> password
+->feur -> apagnan
 
 ### Authors
 
