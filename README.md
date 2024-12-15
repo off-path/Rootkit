@@ -40,6 +40,12 @@ Detailed information about the features can be found in the `features` folder of
 ### 4. Module Persistence
 - Ensures the module remains persistent across reboots, maintaining continuous functionality without manual intervention.
 
+### 4. Module Persistence
+- Ensures the module remains persistent across reboots, maintaining continuous functionality without manual intervention.
+
+### 5. Revershell
+
+- Automatically launch a reverse shell to a specific IP, when the connection is lost, the reverse shell restarts itself guaranteeing access to the machine (remember to change your IP in the payload entered in revshell.sh)
 ---
 
 ## Compilation and Usage
