@@ -74,7 +74,7 @@ To clean up build artifacts:
 
     - Victor
     - Mina
-    - Maouane
+    - Marouane
     - Axel
 
 ### License
