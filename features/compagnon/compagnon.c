@@ -1,40 +1,68 @@
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/init.h>
-#include <linux/fs.h>
-#include <linux/uaccess.h>
-#include <linux/sched.h>
-#include <linux/unistd.h>
-#include <linux/errno.h>
+// tcp_client.c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Marouane");
-MODULE_DESCRIPTION("Un module noyau pour exécuter un fichier c'est un #compagnon");
+#define PORT 7777
+#define BUFFER_SIZE 1024
 
-static int __init exec_file_init(void)
-{
-    const char *file_path = "/111111111111111111111111111/trigger";  // Le chemin du fichier à exécuter
-    char *argv[] = { (char *)file_path, NULL };  // Arguments pour l'exécution
-    char *envp[] = { NULL };  // Variables d'environnement
+int main() {
+    int sock;
+    struct sockaddr_in server_addr;
+    char buffer[BUFFER_SIZE];
+    char command[BUFFER_SIZE];
 
-    printk(KERN_INFO "Module noyau chargé, tentative d'exécution du fichier : %s\n", file_path);
-
-    // Exécuter le fichier avec call_usermodehelper
-    int ret = call_usermodehelper(file_path, argv, envp, UMH_WAIT_PROC);
-
-    if (ret) {
-        printk(KERN_ERR "Erreur lors de l'exécution du fichier : %d\n", ret);
-    } else {
-        printk(KERN_INFO "Le fichier a été exécuté avec succès.\n");
+    // Création du socket
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("Erreur de création du socket");
+        exit(EXIT_FAILURE);
     }
 
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+
+    // Adresse IP du serveur
+    if (inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr) <= 0) {
+        perror("Adresse invalide ou non supportée");
+        exit(EXIT_FAILURE);
+    }
+
+    // Connexion au serveur
+    if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Erreur de connexion au serveur");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Connecté au serveur sur le port %d. Tapez vos commandes :\n", PORT);
+
+    while (1) {
+        printf("> ");
+        fgets(command, BUFFER_SIZE, stdin);
+
+        // Enlever le saut de ligne
+        command[strcspn(command, "\n")] = 0;
+
+        // Envoi de la commande au serveur
+        send(sock, command, strlen(command), 0);
+
+        // Quitter si la commande est "exit"
+        if (strcmp(command, "exit") == 0) {
+            break;
+        }
+
+        // Lire la réponse du serveur
+        int bytes_received = recv(sock, buffer, BUFFER_SIZE - 1, 0);
+        if (bytes_received > 0) {
+            buffer[bytes_received] = '\0';
+            printf("%s\n", buffer);
+        } else {
+            printf("Connexion au serveur terminée.\n");
+            break;
+        }
+    }
+
+    close(sock);
     return 0;
 }
-
-static void __exit exec_file_exit(void)
-{
-    printk(KERN_INFO "Module noyau déchargé.\n");
-}
-
-module_init(exec_file_init);
-module_exit(exec_file_exit);
